@@ -1,0 +1,15 @@
+# Generated test artifacts (locale_test.tcl writes here)
+scripts/test-output/
+
+# Office temporary/lock files
+~$*
+*.tmp
+
+# OS junk
+Thumbs.db
+Desktop.ini
+
+# Editor backups
+*.bak
+*.orig
+*~

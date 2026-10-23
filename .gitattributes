@@ -1,0 +1,12 @@
+# Normalize line endings in the repository (checkout adapts per platform)
+* text=auto
+
+# Tcl sources and docs are text
+*.tcl text
+*.md  text
+
+# Never touch binaries (none expected, but be safe)
+*.png binary
+*.xlsx binary
+*.docx binary
+*.pptx binary
