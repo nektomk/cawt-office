@@ -231,8 +231,35 @@ puts "CawtExcel version: [Cawt GetPkgVersion "cawtexcel"]"
   `GetRangeFillColor`/`GetRangeTextColor` (RGB lists) and
   `$rangeId Borders` → `Item <xlBordersIndex 7..12>` → `LineStyle` (=1
   xlContinuous) / `Weight` (=2 xlThin).
-- Charts: `Excel AddLineChartSimple $worksheetId $numRows $numCols ?title?`,
-  `Excel AddColumnChartSimple ...`, `Excel GetChartSeries $chartId $index`.
+- Charts (verified live 2026-10-25, Excel 16.0 x64 ru-RU — column+line+pie
+  built in one visible dashboard, `tmp/demo_excel.tcl` run):
+  - `Excel AddLineChartSimple $worksheetId $numRows $numCols ?title?`,
+    `Excel AddColumnChartSimple ...`, `Excel GetChartSeries $chartId $index`.
+    Simple wrappers assume a fixed layout: x labels in column 1 starting at
+    row 2, series names in row 1 starting at column 2, data block
+    (2,2)..($numRows+1, $numCols+1). Generic
+    `Excel AddLineChart $ws $headerRow $xaxisCol $startRow $numRows $startCol $numCols ?title? ?yaxisName? ?markerSize?`
+    accepts any columns (e.g. a single-series trend from column 5).
+  - On modern Excel the Add\*Chart/`CreateChart` procs create a **separate
+    chart sheet** (`[$appId Charts Add]`, excelChart.tcl:413-421) and return
+    its chartId. To embed into the worksheet:
+    `set chartObjId [Excel PlaceChart $chartId $ws]`, then size/position —
+    easiest is `Excel ResizeChartObj $chartObjId $rangeId` (fits the chart
+    to a cell range); `SetChartObjPosition $chartObjId $left $top` /
+    `SetChartObjSize $chartObjId $w $h` take **pixels** (Size multiplies by
+    0.75 internally to correct an Excel 4/3 quirk, excelChart.tcl:99-108).
+  - Pie has no Simple wrapper; the base API works:
+    `set c [Excel CreateChart $ws $::Excel::xlPie]` →
+    `Excel SetChartSourceByIndex $c $ws $row1 $col1 $row2 $col2 ?xlColumns?`
+    (include the header row so the series gets its name; `type` is an
+    XlRowCol enum name) → `catch { $c HasLegend True }` →
+    `Excel SetChartTitle $c "..."` → PlaceChart/ResizeChartObj.
+    `CreateChart` expects the enum **value**: `$::Excel::xlPie` = 5,
+    `xlColumnClustered` = 51, `xlLineMarkers` = 65 (excelConst.tcl:801-829).
+  - Measured: column chart ≈ 3.9 s (the first one pays chart-sheet creation
+    + placement), line ≈ 2.1 s, pie ≈ 1.3 s. Cyrillic chart titles are fine
+    under `-encoding utf-8`. Editing a source cell recalculates formulas and
+    redraws all charts immediately (live-recalc demo: =SUM cell 550 → 790).
 
 ### Word
 - `Word OpenNew ?visible? ?width? ?height?` → `appId` (fresh instance; first
