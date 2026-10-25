@@ -2,9 +2,14 @@
 # live (possibly unsaved) content of an open workbook.
 #
 # Usage:
-#   tclsh Excel-04_AttachRead.tcl <open-workbook-name> [sheetName]
+#   tclsh Excel-04_AttachRead.tcl <open-workbook-name> [sheetName|""|-] [maxRows]
 # Example:
 #   tclsh Excel-04_AttachRead.tcl report.xlsx Sales
+#   tclsh Excel-04_AttachRead.tcl report.xlsx - 50
+#   maxRows caps printed rows (default 200; 0 or "all" = no cap);
+#   truncation is reported with the true row count.
+#   "-" may be passed instead of an empty sheetName (some shells, e.g.
+#   PowerShell, drop empty arguments).
 #
 # Read-only: never closes, saves or quits anything; the user's Excel is left
 # exactly as it was. While Excel is "busy" (cursor in cell-edit mode, modal
@@ -13,8 +18,19 @@
 
 set targetFile [lindex $argv 0]
 set sheetName  [lindex $argv 1]
+if { $sheetName eq "-" } { set sheetName "" }
 if { $targetFile eq "" } {
-    puts "Usage: tclsh Excel-04_AttachRead.tcl <open-workbook-name> \[sheetName\]"
+    puts "Usage: tclsh Excel-04_AttachRead.tcl <open-workbook-name> \[sheetName|\"\"|-\] \[maxRows]"
+    exit 1
+}
+
+# Output row cap: default 200 protects the agent context on large sheets;
+# 0 or "all" disables the cap. Pass "" as sheetName to reach maxRows.
+set maxRows [lindex $argv 2]
+if { $maxRows eq "" } { set maxRows 200 }
+if { [string equal -nocase $maxRows "all"] } { set maxRows 0 }
+if { ! [string is integer -strict $maxRows] || $maxRows < 0 } {
+    puts "ERROR: maxRows must be a non-negative integer or 0/\"all\", got: $maxRows"
     exit 1
 }
 
@@ -39,7 +55,7 @@ proc tryBusy { body {attempts 8} {delayMs 2000} } {
 }
 
 proc readLive {} {
-    global targetFile sheetName
+    global targetFile sheetName maxRows
 
     # "Excel Open true" attaches to the already running instance if one exists.
     set appId [Excel Open true]
@@ -76,7 +92,9 @@ proc readLive {} {
 
     set numRows [Excel GetLastUsedRow $worksheetId]
     set numCols [Excel GetLastUsedColumn $worksheetId]
-    set matrix  [Excel GetMatrixValues $worksheetId 1 1 $numRows $numCols]
+    set readRows $numRows
+    if { $maxRows > 0 && $numRows > $maxRows } { set readRows $maxRows }
+    set matrix  [Excel GetMatrixValues $worksheetId 1 1 $readRows $numCols]
 
     set out {}
     lappend out "Workbook  : [$workbookId FullName]"
@@ -86,6 +104,9 @@ proc readLive {} {
     lappend out ""
     foreach row $matrix {
         lappend out [join $row "\t"]
+    }
+    if { $readRows < $numRows } {
+        lappend out "...truncated: shown $readRows of $numRows rows (pass maxRows=N or 0/all for more)"
     }
     return [join $out "\n"]
 }

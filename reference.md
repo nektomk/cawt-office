@@ -159,9 +159,10 @@ puts "CawtExcel version: [Cawt GetPkgVersion "cawtexcel"]"
 ### Excel
 - `Excel OpenNew ?visible? ?width? ?height?` → `appId` (**fresh instance**;
   `visible` defaults to true, so pass `false` for headless runs);
-  `Excel Open ?visible? ?width? ?height?` → `appId` (**attaches to an already
-  running instance** if one exists). The first flag is window *visibility*,
-  not prefer-existing (verified from 3.1.1 sources).
+  `Excel Open ?visible? ?width? ?height?` → `appId` (**GetOrCreateApp**:
+  attaches to an already running instance if one exists, otherwise silently
+  **starts a fresh one**). The first flag is window *visibility*, not
+  prefer-existing (verified from 3.1.1 sources: excelBasic.tcl:1585).
 - `Excel AddWorkbook $appId` → `workbookId`;
   `Excel GetActiveWorkbook $appId`.
 - `Excel GetWorksheetIdByIndex $workbookId $index` → `worksheetId` (index
@@ -200,7 +201,9 @@ puts "CawtExcel version: [Cawt GetPkgVersion "cawtexcel"]"
   `Quit` to hand the file to the user (pattern verified in
   `scripts/Excel-03_OpenVisible.tcl`).
 - Attach & live read: `Excel Open true` attaches to an already running
-  instance; find the workbook via the `$appId Workbooks` collection
+  instance (if none is running, it starts a fresh empty one — a subsequent
+  read then reports the workbook as not open); find the workbook via the
+  `$appId Workbooks` collection
   (`Count`/`Item`, match `FullName`), then read with
   `GetLastUsedRow`/`GetLastUsedColumn` + `GetMatrixValues`. This sees
   **unsaved in-memory edits** (`$workbookId Saved` = false while dirty).
@@ -429,6 +432,27 @@ puts "CawtExcel version: [Cawt GetPkgVersion "cawtexcel"]"
   opens/saves/exports (already the convention); the reply to the user repeats
   those paths, so a run's file footprint is reconstructable from the
   conversation.
+
+## Data volumes over COM (measured 2026-10-25, Excel x64 + tclsh amd64)
+
+- Bulk transfer (`Value2` behind `Get/SetMatrixValues`) scales linearly:
+  ~1.5 µs/cell read, ~2 µs/cell write. A single 500 000-cell call (100k rows
+  × 5 cols, ~4.6 MB Tcl payload) completes in ~0.7–1.0 s with no RPC issues;
+  one big call beats chunking (1 000-row chunks add ~70 %; per-call overhead
+  ≈ 5 ms).
+- Never bulk-read via `GetCellValue` loops (~2.9 ms/cell → 500k cells ≈
+  24 min); note CAWT `GetRowValues`/`GetColumnValues` ARE per-cell loops
+  (20×5 rows: 408 ms vs 3 ms for one `GetMatrixValues` — 136×).
+- String cells cost ~1.8× more than numbers (BSTR marshalling).
+- 32-bit Office/Tcl: keep single-call volumes ≤ ~100–250k cells (2 GB
+  address space); 64-bit is RAM-bound only. Local RPC fragments large arrays
+  transparently (the "64 KB limit" is an ORPC buffer size, not a data cap).
+- Long calls block Excel's single COM thread — wider window for
+  RPC_E_CALL_REJECTED; keep the retry pattern (Excel-04).
+- The agent-context limit arrives far earlier than the COM limit: a 500k-cell
+  dump is >1 M tokens. Hence Excel-02/Excel-04 cap printed rows (`maxRows`,
+  default 200, `0`/`all` = unlimited) and report truncation with the true row
+  count; for full data prefer file export (CSV `SaveAs`) over console dumps.
 
 ## Performance (measurements of 2026-10-25 on the reference environment — see "Example verified setup"; other machines will differ)
 

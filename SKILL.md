@@ -40,18 +40,21 @@ ru-RU.
 ## Script index (scripts/, ready to run)
 
 Positional args; `<x>` required, `[x]` optional. Exit 0 = success; scripts
-print result paths/values. Typical wall times measured 2026-10-25 on the
-reference environment (Windows, ActiveTcl 8.6.13 + CAWT 3.1.1, SSD); other
-machines will differ.
+print result paths/values. `[maxRows]` caps printed rows (default **200**,
+`0`/`all` = unlimited; pass `-` for `[sheet]` to reach it — shells like
+PowerShell drop empty args) — on truncation the scripts print the true row
+count. Typical wall times measured 2026-10-25
+on the reference environment (Windows, ActiveTcl 8.6.13 + CAWT 3.1.1, SSD);
+other machines will differ.
 
 | Script | Args | Purpose | Wall |
 |---|---|---|---:|
 | `cawt_check.tcl` | — | environment health: tclsh, Twapi, CAWT, sub-package versions | <1 s |
 | `cawt_probe.tcl` | `[pattern]` e.g. `"Excel::Set*"` | exact command names of the installed CAWT version | <1 s |
 | `Excel-01_Create.tcl` | `<out.xlsx>` | hidden Excel: create+fill+save a sample table (real numbers), quit | ~2 s |
-| `Excel-02_Read.tcl` | `<in.xlsx> [sheet]` | hidden Excel: open read-only, print used-range matrix, quit | ~2 s |
+| `Excel-02_Read.tcl` | `<in.xlsx> [sheet] [maxRows]` | hidden Excel: open read-only, print used-range matrix (row cap), quit | ~2 s |
 | `Excel-03_OpenVisible.tcl` | `<file.xlsx>` | attach to running Excel (or start one), open the file in a VISIBLE window that survives script exit — handoff to the user | ~0.8 s |
-| `Excel-04_AttachRead.tcl` | `<open-workbook-name> [sheet]` | attach to running Excel, print LIVE (possibly unsaved) content; strictly read-only; auto-retries RPC_E_CALL_REJECTED | ~0.5 s |
+| `Excel-04_AttachRead.tcl` | `<open-workbook-name> [sheet] [maxRows]` | attach to running Excel, print LIVE (possibly unsaved) content (row cap); strictly read-only; auto-retries RPC_E_CALL_REJECTED | ~0.5 s |
 | `Word-01_Create.tcl` | `<out.docx>` | hidden Word: styled title + body + 3×2 table, save, quit | ~5.4 s |
 | `md2docx.tcl` | `<in.md> <out.docx>` | render Markdown (h1–h3, paragraphs, ul/ol, quotes, code blocks, inline bold/italic/code/links) into a styled VISIBLE DOCX; window stays open | ~4.7 s |
 | `Ppt-01_Create.tcl` | `<out.pptx> [image]` | PowerPoint: 2 slides with textboxes (+optional image), save, quit. **Ppt is single-instance — Quit closes the user's running PowerPoint; check processes first** | ~6.1 s |
@@ -116,6 +119,11 @@ cawt` ≈ 0.5 s per extra run).
   UTF-8 (`fconfigure $fh -encoding utf-8`), read `.md` files UTF-8.
 - `.Text`/display values truncate to column width (`########`) — widen the
   column or read `Value`/CSV.
+- CAWT `GetRowValues`/`GetColumnValues` are per-cell loops internally
+  (~2.9 ms/cell) — for anything bulk use `GetMatrixValues`/`SetMatrixValues`
+  (one Value2 call; measured 136× faster on 20×5, linear up to 500k cells).
+  Never dump a full large sheet to the agent: cap rows (maxRows) or export
+  to a file.
 - Excel formatting: `SetRangeBorders` does only the 4 outer edges — the inner
   grid needs `SetRangeBorder $rangeId xlInsideVertical|xlInsideHorizontal
   xlThin xlContinuous`; colors accept name/`#RRGGBB`/triplet (`Cawt

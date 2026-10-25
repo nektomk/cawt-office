@@ -98,9 +98,9 @@ CAWT, особенности локалей (числа, даты, формул�
 
 ```bat
 tclsh scripts\Excel-01_Create.tcl      report.xlsx
-tclsh scripts\Excel-02_Read.tcl        report.xlsx
+tclsh scripts\Excel-02_Read.tcl        report.xlsx - 50
 tclsh scripts\Excel-03_OpenVisible.tcl report.xlsx
-tclsh scripts\Excel-04_AttachRead.tcl  report.xlsx Sales
+tclsh scripts\Excel-04_AttachRead.tcl  report.xlsx Sales 200
 tclsh scripts\Word-01_Create.tcl       report.docx
 tclsh scripts\md2docx.tcl              README.md out.docx
 tclsh scripts\Ppt-01_Create.tcl        deck.ppt image.png
@@ -113,9 +113,9 @@ tclsh scripts\locale_test.tcl
 | `cawt_check.tcl` | диагностика установки (tclsh, Twapi, CAWT, подпакеты) |
 | `cawt_probe.tcl` | интроспекция: точные имена команд установленной CAWT |
 | `Excel-01_Create.tcl` | создать книгу, заполнить таблицу, сохранить |
-| `Excel-02_Read.tcl` | открыть книгу read-only и прочитать значения |
+| `Excel-02_Read.tcl` | открыть книгу read-only и прочитать значения (лимит строк вывода `maxRows`, по умолчанию 200; 0/all — без лимита) |
 | `Excel-03_OpenVisible.tcl` | открыть книгу в **видимом** окне Excel и оставить пользователю |
-| `Excel-04_AttachRead.tcl` | подключиться к запущенному Excel и прочитать живое содержимое |
+| `Excel-04_AttachRead.tcl` | подключиться к запущенному Excel и прочитать живое содержимое (тот же лимит `maxRows`) |
 | `locale_test.tcl` | тест локаль-чувствительности (числа, даты, формулы, CSV) |
 | `Word-01_Create.tcl` | создать документ: текст + таблица, сохранить |
 | `md2docx.tcl` | конвертер Markdown → DOCX с оформлением, в видимом Word |
