@@ -99,8 +99,15 @@ puts "CawtExcel version: [Cawt GetPkgVersion "cawtexcel"]"
   crashes a property setter under Twapi 5 (verified failure: `expected integer
   but got "true"`).
 - **PowerPoint is single-instance:** `Ppt Open` attaches to an already running
-  PowerPoint, and a later `Ppt Quit $appId` closes the user's window. Only
-  quit an instance the script is sure it owns.
+  PowerPoint, and a later `Ppt Quit $appId`/`Ppt CloseAll $appId` closes the
+  user's windows. Only quit an instance the script is sure it owns. CAWT does
+  not expose attached-vs-created (`GetOrCreateApp` keeps it internal), so the
+  verified ownership heuristic is the presentation count BEFORE `AddPres`:
+  `set n [$appId -with { Presentations } Count]` — `n > 0` ⇒ attached (guest
+  mode: close only your own via `Ppt Close $presId`, never CloseAll/Quit);
+  `n == 0` ⇒ treat as own and Quit (PowerPoint normally exits with its last
+  presentation; a running empty instance is a stray case). Reference
+  implementation: `scripts/Ppt-01_Create.tcl`.
 - **Excel numeric round-trip:** real cells come back from `GetMatrixValues` /
   raw `Value` as double strings ("100.0" — Excel stores every number as a
   double); use `GetCellValue ... int|real` for typed reads and `... display`
@@ -279,7 +286,9 @@ puts "CawtExcel version: [Cawt GetPkgVersion "cawtexcel"]"
   `Ppt InsertImage $slideId $imgFile ?left ?top ?width ?height ?fit????`;
   `Ppt AddShape $slideId $shapeType $left $top $width $height ?options?`.
 - Save/close: `Ppt SaveAs $presId $fileName` (append
-  `[Ppt GetExtString $appId]`), `Ppt CloseAll $appId`, `Ppt Quit $appId`.
+  `[Ppt GetExtString $appId]`), `Ppt Close $presId` (single presentation, no
+  save — guest-mode safe), `Ppt CloseAll $appId` / `Ppt Quit $appId` (own
+  instances only).
 
 ### Outlook
 - `Outlook Open` → `appId`; `Outlook GetVersion $appId true`.

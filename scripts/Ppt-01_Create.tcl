@@ -2,7 +2,9 @@
 # boxes, shapes and an image, save it.
 #
 # Usage:
-#   tclsh Ppt-01_Create.tcl <output.pptx> [<imageFile>] [overwrite]
+#   tclsh Ppt-01_Create.tcl <output.pptx> [<imageFile>|-] [overwrite]
+#   Pass '-' (or omit) for no image; '-' keeps [overwrite] reachable because
+#   shells like PowerShell drop empty args.
 #   overwrite = 1/true/yes/force permits replacing an existing file;
 #   without it an existing <output.pptx> is refused with exit code 2 (S10).
 #
@@ -13,6 +15,8 @@ if { $outFile eq "" } {
     set outFile [file join [pwd] "presentation.pptx"]
 }
 set imgFile [lindex $argv 1]
+# '-' is the alias for "no image" (shells drop empty args).
+if { $imgFile eq "-" } { set imgFile "" }
 
 # S10 overwrite consent: never silently replace an existing file.
 # Checked BEFORE any COM startup: refusal costs no Office instance.
@@ -29,46 +33,70 @@ if { ! $overwrite && [file exists $outFile] } {
 
 package require cawt
 
-# Note: unlike Excel/Word, "Ppt OpenNew" does NOT take a useExistingFirst flag
-# (its first argument is the slide width). Use plain "Ppt Open" as in the
-# official CAWT tests. PowerPoint is a single-instance application: if the
-# user already has PowerPoint open, this attaches to it - and the "Ppt Quit"
-# at the end would close it. Remove the Quit line if that is not acceptable.
+# S5 hardening. Unlike Excel/Word, "Ppt OpenNew" does NOT take a
+# useExistingFirst flag (its first argument is the slide width), and
+# PowerPoint is single-instance at the COM level - "Ppt Open" attaches to a
+# running PowerPoint if one exists. Ownership heuristic: count presentations
+# BEFORE AddPres. Count > 0 => we attached to the user's app => guest mode:
+# close only our own presentation, never CloseAll/Quit. Count == 0 => treat
+# the instance as created by this script and quit it (PowerPoint normally
+# exits together with its last presentation, so a running empty instance is
+# a stray case; quitting it is reported below).
 set appId [Ppt Open]
+set numPresBefore [$appId -with { Presentations } Count]
+set ownInstance [expr { $numPresBefore == 0 }]
 
-# A new, empty presentation.
-set presId [Ppt AddPres $appId]
+set presId ""
+set presClosed false
+set rc [catch {
+    # A new, empty presentation.
+    set presId [Ppt AddPres $appId]
 
-# Slide 1: title text box.
-set slideId [Ppt AddSlide $presId]
-set tbox [Ppt AddTextbox $slideId 1c 1c 20c 5c]
-Ppt AddTextboxText $tbox "Quarterly review"
+    # Slide 1: title text box.
+    set slideId [Ppt AddSlide $presId]
+    set tbox [Ppt AddTextbox $slideId 1c 1c 20c 5c]
+    Ppt AddTextboxText $tbox "Quarterly review"
 
-# Slide 2: bullets.
-set slideId [Ppt AddSlide $presId]
-set tbox [Ppt AddTextbox $slideId 1c 1c 20c 10c]
-foreach line { "Revenue is up 12%" "Three new accounts closed" "Next steps: scale support" } {
-    Ppt AddTextboxText $tbox $line true
-}
-Cawt Destroy $tbox
+    # Slide 2: bullets.
+    set slideId [Ppt AddSlide $presId]
+    set tbox [Ppt AddTextbox $slideId 1c 1c 20c 10c]
+    foreach line { "Revenue is up 12%" "Three new accounts closed" "Next steps: scale support" } {
+        Ppt AddTextboxText $tbox $line true
+    }
+    Cawt Destroy $tbox
 
-# Optional image on slide 2.
-if { $imgFile ne "" } {
-    Ppt InsertImage $slideId $imgFile 1c 12c 8c 8c
-}
-Cawt Destroy $slideId
+    # Optional image on slide 2.
+    if { $imgFile ne "" } {
+        Ppt InsertImage $slideId $imgFile 1c 12c 8c 8c
+    }
+    Cawt Destroy $slideId
 
-# Save using the application's default extension if none given.
-if { [string tolower [file extension $outFile]] eq "" } {
-    append outFile [Ppt GetExtString $appId]
-}
+    # Save using the application's default extension if none given.
+    if { [string tolower [file extension $outFile]] eq "" } {
+        append outFile [Ppt GetExtString $appId]
+    }
 
-Ppt SaveAs $presId $outFile
-puts "Saved: $outFile"
+    Ppt SaveAs $presId $outFile
+    puts "Saved: $outFile"
 
-# Close all presentations and quit the invisible instance we created.
-Ppt CloseAll $appId
-Ppt Quit $appId
+    # Close ONLY our own presentation (saved above - no prompt).
+    Ppt Close $presId
+    set presClosed true
+} err]
 
+# Error path: drop our half-built presentation, still never CloseAll.
+if { ! $presClosed && $presId ne "" } { catch { Ppt Close $presId } }
+# Quit only an instance this script created.
+if { $ownInstance } { catch { Ppt Quit $appId } }
 Cawt Destroy
+
+if { $rc } {
+    puts "ERROR: $err"
+    exit 1
+}
+if { $ownInstance } {
+    puts "Quit the PowerPoint instance created by this script."
+} else {
+    puts "Guest mode: attached to the running PowerPoint ($numPresBefore pre-existing presentation(s)); closed only our own, app left running."
+}
 puts "Done."

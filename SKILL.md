@@ -47,7 +47,9 @@ ru-RU.
 Positional args; `<x>` required, `[x]` optional. Exit 0 = success; scripts
 print result paths/values; exit 2 = target file already exists and no
 `[overwrite]` (1/true/yes/force) given — creation scripts refuse silent
-replacement (consent rules: S10). `[maxRows]` caps printed rows (default **200**,
+replacement (consent rules: S10). Pass `-` for a skipped optional arg
+(`[sheet]`, `[image]`) to reach later ones — shells like PowerShell drop
+empty args. `[maxRows]` caps printed rows (default **200**,
 `0`/`all` = unlimited; pass `-` for `[sheet]` to reach it — shells like
 PowerShell drop empty args) — on truncation the scripts print the true row
 count. Typical wall times measured 2026-10-25
@@ -64,7 +66,7 @@ other machines will differ.
 | `Excel-04_AttachRead.tcl` | `<open-workbook-name> [sheet] [maxRows]` | attach to running Excel, print LIVE (possibly unsaved) content (row cap); strictly read-only; auto-retries RPC_E_CALL_REJECTED | ~0.5 s |
 | `Word-01_Create.tcl` | `<out.docx> [overwrite]` | hidden Word: styled title + body + 3×2 table, save, quit | ~5.4 s |
 | `md2docx.tcl` | `<in.md> <out.docx> [overwrite]` | render Markdown (h1–h3, paragraphs, ul/ol, quotes, code blocks, inline bold/italic/code/links) into a styled VISIBLE DOCX; window stays open | ~4.7 s |
-| `Ppt-01_Create.tcl` | `<out.pptx> [image] [overwrite]` | PowerPoint: 2 slides with textboxes (+optional image), save, quit. **Ppt is single-instance — Quit closes the user's running PowerPoint; check processes first** | ~6.1 s |
+| `Ppt-01_Create.tcl` | `<out.pptx> [image|-] [overwrite]` | PowerPoint: 2 slides with textboxes (+optional image), save, close. **Ppt is single-instance — attach-safe: closes only its own presentation; quits only an instance it created** | ~6.1 s |
 | `Outlook-01_Mail.tcl` | `<recipient> [subject] [body] [attachment...]` | create a mail draft in the user's Outlook (NO send — SendMail is commented out; sending is S4 territory) | — |
 | `locale_test.tcl` | — | ru-RU locale behavior demo: numbers, dates, formulas, CSV export | — |
 
@@ -110,7 +112,10 @@ cawt` ≈ 0.5 s per extra run).
 - Word `$docId Paragraphs` → `Count` includes the trailing empty paragraph:
   the last appended paragraph is `Item Count-1`.
 - PowerPoint is single-instance: `Ppt Open` attaches to the user's PPT and
-  `Ppt Quit` would close the user's window — quit only what you own.
+  `Ppt Quit`/`Ppt CloseAll` would close the user's windows — quit only what
+  you own. Reference implementation: `Ppt-01_Create.tcl` counts presentations
+  before `AddPres` (0 ⇒ instance is ours ⇒ Quit; >0 ⇒ guest mode:
+  `Ppt Close $presId` for our own presentation only, app stays running).
 - Busy Excel rejects COM (cell-edit mode / modal dialog):
   RPC_E_CALL_REJECTED — retry 8×2 s, tell the user to press Esc.
 - COM `Formula` is always US syntax (`=SUM(B2:D2)`, `.` decimals, `,`
