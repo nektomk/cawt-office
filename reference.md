@@ -330,11 +330,18 @@ puts "CawtExcel version: [Cawt GetPkgVersion "cawtexcel"]"
   numbers) — widen the column (`ColumnWidth`) before reading display text, or
   take the CSV/`Value` route.
 - **tclsh encodings:** check `encoding system` and the console code page at
-  runtime. On legacy single-byte setups (reference environment example:
-  system cp1251, console cp866 — the console mangles Cyrillic) keep `.tcl`
-  sources ASCII-only (non-ASCII literals as `\uXXXX` escapes), write
-  machine-readable reports with `fconfigure $fh -encoding utf-8`, and read
-  `.md` files with `fconfigure $fh -encoding utf-8`.
+  runtime. **Run scripts as `tclsh -encoding utf-8 script.tcl`:** Tcl 8.x
+  otherwise reads the main script in the system codepage and UTF-8 non-ASCII
+  literals corrupt *silently* (measured on cp1251: a 10-char "Париж-тест"
+  literal arrives as 19 mojibake chars, exit code still 0; with the flag —
+  exact match). Caveats: the flag covers only the main script (`source`
+  inside still defaults to the system encoding — use `source -encoding
+  utf-8`); stdout keeps the console codepage (keep prints ASCII or
+  `chan configure stdout -encoding utf-8`); argv is Unicode regardless (Win32
+  wide API); Tcl 9 defaults to UTF-8 (flag harmless). Portable alternative
+  used by all bundled scripts: ASCII-only `.tcl` sources (non-ASCII literals
+  as `\uXXXX` escapes), machine-readable reports via `fconfigure $fh
+  -encoding utf-8`, `.md` input via `fconfigure $fh -encoding utf-8`.
 
 ## Trap details (observed live)
 
