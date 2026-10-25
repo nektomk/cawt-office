@@ -2,7 +2,9 @@
 # in a VISIBLE Word instance left open for the user.
 #
 # Usage:
-#   tclsh md2docx.tcl <input.md> <output.docx>
+#   tclsh md2docx.tcl <input.md> <output.docx> [overwrite]
+#   overwrite = 1/true/yes/force permits replacing an existing file;
+#   without it an existing <output.docx> is refused with exit code 2 (S10).
 #
 # Supported Markdown subset: #/##/### headings, fenced code blocks (```),
 # blockquotes (>), bullet/numbered lists with continuation lines, paragraphs
@@ -10,11 +12,23 @@
 # Source is ASCII-only; all Unicode comes from the input file (read as UTF-8).
 
 if { [llength $argv] < 2 } {
-    puts "Usage: tclsh md2docx.tcl <input.md> <output.docx>"
+    puts "Usage: tclsh md2docx.tcl <input.md> <output.docx> [overwrite]"
     exit 1
 }
 set mdPath  [file normalize [lindex $argv 0]]
 set outPath [file nativename [file normalize [lindex $argv 1]]]
+
+# S10 overwrite consent: never silently replace an existing file.
+set owRaw [lindex $argv 2]
+set overwrite [expr {[string tolower $owRaw] in {1 true yes overwrite force}}]
+if { $owRaw ne "" && ! $overwrite } {
+    puts "ERROR: bad overwrite value '$owRaw' (use 1)"
+    exit 1
+}
+if { ! $overwrite && [file exists $outPath] } {
+    puts "ERROR: $outPath already exists - rerun with overwrite arg 1 or choose another name"
+    exit 2
+}
 
 # ---------------- Read markdown ----------------
 set fh [open $mdPath r]
@@ -296,9 +310,17 @@ if { [catch {
     catch { $docId Activate }
 } err] } {
     puts "FATAL: $err"
-    # Close only OUR document (no prompts); leave any Word window alone -
-    # we cannot be 100% sure the instance is exclusively ours.
+    # Locked-target hint; the COM message is locale-dependent, so match the
+    # English and the Russian wording ("...another process" / "...\u0434\u0440\u0443\u0433\u0438\u043c \u043f\u0440\u043e\u0446\u0435\u0441\u0441\u043e\u043c").
+    if { [string match -nocase "*another process*" $err] || [string match -nocase "*\u0434\u0440\u0443\u0433\u0438\u043c \u043f\u0440\u043e\u0446\u0435\u0441\u0441\u043e\u043c*" $err] } {
+        puts "HINT: target file is locked (probably open in Word) - close it and retry"
+    }
+    # Close only OUR document (no prompts), then quit OUR instance: Word
+    # OpenNew uses GetOrCreateApp ... false (wordBasic.tcl:1522), so the
+    # instance is always one this script created - never the user's Word.
+    # Without this an empty visible window would survive the failure.
     if { $docId ne "" } { catch { $docId Close 0 } }
+    if { $appId ne "" } { catch { Word Quit $appId } }
     catch { Cawt Destroy }
     exit 1
 }

@@ -1,13 +1,27 @@
 # Excel-01_Create.tcl - Create an Excel workbook, fill cells, save it.
 #
 # Usage:
-#   tclsh Excel-01_Create.tcl <output.xlsx>
+#   tclsh Excel-01_Create.tcl <output.xlsx> [overwrite]
+#   overwrite = 1/true/yes/force permits replacing an existing file;
+#   without it an existing <output.xlsx> is refused with exit code 2 (S10).
 #
 # Requires: CAWT + Twapi, MS Excel installed.
 
 set outFile [lindex $argv 0]
 if { $outFile eq "" } {
     set outFile [file join [pwd] "report.xlsx"]
+}
+
+# S10 overwrite consent: never silently replace an existing file.
+set owRaw [lindex $argv 1]
+set overwrite [expr {[string tolower $owRaw] in {1 true yes overwrite force}}]
+if { $owRaw ne "" && ! $overwrite } {
+    puts "ERROR: bad overwrite value '$owRaw' (use 1)"
+    exit 1
+}
+if { ! $overwrite && [file exists $outFile] } {
+    puts "ERROR: $outFile already exists - rerun with overwrite arg 1 or choose another name"
+    exit 2
 }
 
 package require cawt

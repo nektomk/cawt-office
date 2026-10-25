@@ -1,13 +1,27 @@
 # Word-01_Create.tcl - Create a Word document, add text and a table, save it.
 #
 # Usage:
-#   tclsh Word-01_Create.tcl <output.docx>
+#   tclsh Word-01_Create.tcl <output.docx> [overwrite]
+#   overwrite = 1/true/yes/force permits replacing an existing file;
+#   without it an existing <output.docx> is refused with exit code 2 (S10).
 #
 # Requires: CAWT + Twapi, MS Word installed.
 
 set outFile [lindex $argv 0]
 if { $outFile eq "" } {
     set outFile [file join [pwd] "report.docx"]
+}
+
+# S10 overwrite consent: never silently replace an existing file.
+set owRaw [lindex $argv 1]
+set overwrite [expr {[string tolower $owRaw] in {1 true yes overwrite force}}]
+if { $owRaw ne "" && ! $overwrite } {
+    puts "ERROR: bad overwrite value '$owRaw' (use 1)"
+    exit 1
+}
+if { ! $overwrite && [file exists $outFile] } {
+    puts "ERROR: $outFile already exists - rerun with overwrite arg 1 or choose another name"
+    exit 2
 }
 
 package require cawt

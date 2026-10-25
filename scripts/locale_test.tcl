@@ -10,6 +10,8 @@
 # Usage:
 #   tclsh locale_test.tcl
 #   -> writes test-output/locale_report.txt next to this script
+#   Overwrites its own artifacts in scripts/test-output/ without asking
+#   (S10 exemption: files created by this skill's own test runs).
 
 set outDir     [file join [file dirname [info script]] "test-output"]
 file mkdir $outDir
@@ -118,7 +120,11 @@ set rc [catch {
     L ""
     L "=== 3. Save xlsx + CSV (xlCSV=6), then quit ==="
     probe "SaveAs xlsx" { Excel SaveAs $wb $::xlsxPath; format ok }
-    probe "SaveAs csv"  { $wb SaveAs $::csvPath 6; format ok }
+    # Raw SaveAs prompts on overwrite when alerts are ON - and CAWT's
+    # Excel SaveAs above restores DisplayAlerts=true (excelBasic.tcl:1796).
+    # Suppress around the raw call (observed live 2026-10-25: an overwrite
+    # dialog for the existing locale_test.csv reached the user's desktop).
+    probe "SaveAs csv"  { $appId DisplayAlerts false; $wb SaveAs $::csvPath 6; $appId DisplayAlerts true; format ok }
     probe "Close+Quit"  { Excel Close $wb; Excel Quit $appId; format ok }
 } fatalErr]
 

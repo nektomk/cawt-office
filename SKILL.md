@@ -45,7 +45,9 @@ ru-RU.
 ## Script index (scripts/, ready to run)
 
 Positional args; `<x>` required, `[x]` optional. Exit 0 = success; scripts
-print result paths/values. `[maxRows]` caps printed rows (default **200**,
+print result paths/values; exit 2 = target file already exists and no
+`[overwrite]` (1/true/yes/force) given — creation scripts refuse silent
+replacement (consent rules: S10). `[maxRows]` caps printed rows (default **200**,
 `0`/`all` = unlimited; pass `-` for `[sheet]` to reach it — shells like
 PowerShell drop empty args) — on truncation the scripts print the true row
 count. Typical wall times measured 2026-10-25
@@ -56,13 +58,13 @@ other machines will differ.
 |---|---|---|---:|
 | `cawt_check.tcl` | — | environment health: tclsh, Twapi, CAWT, sub-package versions | <1 s |
 | `cawt_probe.tcl` | `[pattern]` e.g. `"Excel::Set*"` | exact command names of the installed CAWT version | <1 s |
-| `Excel-01_Create.tcl` | `<out.xlsx>` | hidden Excel: create+fill+save a sample table (real numbers), quit | ~2 s |
+| `Excel-01_Create.tcl` | `<out.xlsx> [overwrite]` | hidden Excel: create+fill+save a sample table (real numbers), quit | ~2 s |
 | `Excel-02_Read.tcl` | `<in.xlsx> [sheet] [maxRows]` | hidden Excel: open read-only, print used-range matrix (row cap), quit | ~2 s |
 | `Excel-03_OpenVisible.tcl` | `<file.xlsx>` | attach to running Excel (or start one), open the file in a VISIBLE window that survives script exit — handoff to the user | ~0.8 s |
 | `Excel-04_AttachRead.tcl` | `<open-workbook-name> [sheet] [maxRows]` | attach to running Excel, print LIVE (possibly unsaved) content (row cap); strictly read-only; auto-retries RPC_E_CALL_REJECTED | ~0.5 s |
-| `Word-01_Create.tcl` | `<out.docx>` | hidden Word: styled title + body + 3×2 table, save, quit | ~5.4 s |
-| `md2docx.tcl` | `<in.md> <out.docx>` | render Markdown (h1–h3, paragraphs, ul/ol, quotes, code blocks, inline bold/italic/code/links) into a styled VISIBLE DOCX; window stays open | ~4.7 s |
-| `Ppt-01_Create.tcl` | `<out.pptx> [image]` | PowerPoint: 2 slides with textboxes (+optional image), save, quit. **Ppt is single-instance — Quit closes the user's running PowerPoint; check processes first** | ~6.1 s |
+| `Word-01_Create.tcl` | `<out.docx> [overwrite]` | hidden Word: styled title + body + 3×2 table, save, quit | ~5.4 s |
+| `md2docx.tcl` | `<in.md> <out.docx> [overwrite]` | render Markdown (h1–h3, paragraphs, ul/ol, quotes, code blocks, inline bold/italic/code/links) into a styled VISIBLE DOCX; window stays open | ~4.7 s |
+| `Ppt-01_Create.tcl` | `<out.pptx> [image] [overwrite]` | PowerPoint: 2 slides with textboxes (+optional image), save, quit. **Ppt is single-instance — Quit closes the user's running PowerPoint; check processes first** | ~6.1 s |
 | `Outlook-01_Mail.tcl` | `<recipient> [subject] [body] [attachment...]` | create a mail draft in the user's Outlook (NO send — SendMail is commented out; sending is S4 territory) | — |
 | `locale_test.tcl` | — | ru-RU locale behavior demo: numbers, dates, formulas, CSV export | — |
 
@@ -137,6 +139,16 @@ cawt` ≈ 0.5 s per extra run).
   (empty MainWindowTitle) by verified PID+StartTime.
 - Files open in Word/Excel hold file locks — copy before disk-level
   inspection, or close via COM first.
+- SaveAs over existing files (measured 2026-10-25): raw `$workbookId SaveAs`
+  in Excel **blocks on an overwrite dialog** (DisplayAlerts defaults ON) —
+  usually invisible (hangs forever), but it can surface onto the user's
+  desktop (observed live). CAWT `Excel/Word/Ppt SaveAs` suppresses it
+  internally and **restores DisplayAlerts=true afterwards** — re-disable
+  before any raw SaveAs that follows. Word/PowerPoint never prompt via
+  COM — they overwrite silently even with alerts ON → the creation
+  scripts refuse an existing target without the `overwrite` arg (S10). No
+  SaveAs in any Office app has an "overwrite" parameter; app-level
+  DisplayAlerts is the only switch.
 
 ## Security policy (sandbox compensation — BINDING)
 
@@ -191,6 +203,12 @@ documentation: `SECURITY.md`.
 - **S9 Audit trail.** Every script prints each file path it
   opens/saves/exports; the reply repeats those paths, so a run's file
   footprint is reconstructable from the conversation.
+- **S10 Overwrite consent.** Never silently replace an existing file.
+  Creation scripts (Excel-01, Word-01, Ppt-01, md2docx) refuse an existing
+  target with exit 2 unless given the `overwrite` arg (1/true/yes/force).
+  Pass it only when the target is inside the session workspace, was created
+  by this session (S9 paths), or the user authorized the overwrite in the
+  current request; otherwise ask the user first.
 
 ## Deliverable checklist
 

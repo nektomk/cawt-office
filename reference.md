@@ -2,7 +2,7 @@
 
 The detailed half of the `cawt-office` skill. The compact core (quick start,
 script index with arguments, lifecycle, critical traps, binding security
-policy S1–S9) lives in `SKILL.md`; the agent reads this file **on demand** —
+policy S1–S10) lives in `SKILL.md`; the agent reads this file **on demand** —
 when it needs exact API signatures, locale deep-dives, trap case studies or
 benchmark numbers.
 
@@ -193,8 +193,12 @@ puts "CawtExcel version: [Cawt GetPkgVersion "cawtexcel"]"
   `Excel DeleteWorksheet $workbookId $sheetId`,
   `Excel GetWorksheetIdByName $workbookId $name`.
 - Save/close: `Excel SaveAs $workbookId $fileName` (append
-  `[Excel GetExtString $appId]` if needed), `Excel Close $workbookId`,
-  `Excel Quit $appId`.
+  `[Excel GetExtString $appId]` if needed; full form
+  `Excel SaveAs $workbookId $fileName ?fmt? ?backup?` — `fmt` is an
+  XlFileFormat enum name, `backup true` writes a `.xlk` before overwriting),
+  `Excel Close $workbookId`, `Excel Quit $appId`. Note: CAWT SaveAs toggles
+  DisplayAlerts off internally and **restores it to true afterwards**
+  (excelBasic.tcl:1782/1796) — re-disable if a later step needs alerts off.
 - Visible mode: `Excel Open true` shows the application window (see official
   test Excel-16_SetGet.tcl), or set `$appId Visible true` explicitly. A
   visible instance with an open workbook **survives script exit** — omit
@@ -372,6 +376,22 @@ puts "CawtExcel version: [Cawt GetPkgVersion "cawtexcel"]"
   a file lock (disk-level inspection like ZipFile::OpenRead fails with "used
   by another process") — copy the file first, or close the book/document via
   COM before reading it from disk.
+- **SaveAs onto an existing file (measured 2026-10-25, hidden instances, raw
+  COM):** Excel raw `$workbookId SaveAs` onto an existing path **hangs
+  forever** — an invisible "replace file?" modal (DisplayAlerts defaults ON=1);
+  only killing tclsh + the Excel process recovers. With `DisplayAlerts false`
+  set beforehand it overwrites silently. Word (DisplayAlerts defaults 0) and
+  PowerPoint (defaults 1) never prompt via COM — raw SaveAs overwrites
+  silently even with alerts ON (physically rewrites a dirty document; an
+  unchanged Word document may skip the write). CAWT `Excel/Word/Ppt SaveAs`
+  wrappers suppress alerts themselves and restore DisplayAlerts=true after.
+  No SaveAs signature has an overwrite parameter; the only COM-level switch
+  is app-wide DisplayAlerts (plus Excel `CreateBackup`/`.xlk` as a safety
+  net). Observed live (2026-10-25): locale_test's raw CSV `$wb SaveAs ... 6`
+  threw an overwrite dialog onto the user's desktop because the preceding
+  CAWT `Excel SaveAs` had restored DisplayAlerts=true — always re-disable
+  alerts around raw SaveAs calls. Agent-level guard: policy S10 and the
+  scripts' `overwrite` arg (refusal with exit 2 before any COM startup).
 
 ## Security policy — full text and rationale
 
@@ -382,7 +402,7 @@ puts "CawtExcel version: [Cawt GetPkgVersion "cawtexcel"]"
 > **The effective policy of the current DSH session (read-only /
 > workspace-write / danger-full-access) applies to Office-side operations
 > verbatim.** End-user documentation of these risks lives in `SECURITY.md`;
-> the binding compact rules S1–S9 live in `SKILL.md`.
+> the binding compact rules S1–S10 live in `SKILL.md`.
 
 - **S1. Session-policy floor.** In a *read-only* session: no
   `SaveAs`/`Save`/export/print-to-file of any kind — attach-and-read patterns
@@ -439,6 +459,16 @@ puts "CawtExcel version: [Cawt GetPkgVersion "cawtexcel"]"
   opens/saves/exports (already the convention); the reply to the user repeats
   those paths, so a run's file footprint is reconstructable from the
   conversation.
+- **S10. Overwrite consent.** Silently replacing an existing file is data
+  loss without consent (no recycle bin) — the same destructive class as S4
+  sending. COM cannot supply the consent (Excel prompts = invisible hang;
+  Word/Ppt never prompt at all), so enforcement lives at the agent level:
+  bundled creation scripts refuse an existing target before any COM startup
+  (exit 2) unless explicitly passed `overwrite` (1/true/yes/force), and the
+  agent passes that argument only when the target is inside the session
+  workspace, was created by this session (S9 paths), or the user authorized
+  the overwrite in the current request — otherwise ask first. Middle ground:
+  Excel `SaveAs ... backup true` leaves a `.xlk` copy.
 
 ## Data volumes over COM (measured 2026-10-25, Excel x64 + tclsh amd64)
 
