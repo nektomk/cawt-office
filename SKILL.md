@@ -1,6 +1,8 @@
 ---
 name: cawt-office
-description: Automate live Microsoft Office applications (Excel, Word, PowerPoint, Outlook) on Windows through the COM interface using the CAWT Tcl library, including creating, reading, editing, formatting, and saving documents.
+description: Automate live Microsoft Office applications (Excel, Word, PowerPoint, Outlook) on Windows through the COM interface using the CAWT Tcl library, including creating, reading, editing, formatting, and saving documents. Use when a task involves an already-open or to-be-opened Office application, live/unsaved workbook or document content, visible windows, or attaching to the user's running Excel/Word/PowerPoint/Outlook; for file-only deliverables prefer office-xlsx/office-docx/office-pptx.
+license: BSD-3-Clause (full text in LICENSE)
+compatibility: Requires Windows with Microsoft Office installed (Excel/Word/PowerPoint/Outlook) and a Tcl 8.6+ interpreter with Twapi >= 4.4 and CAWT >= 3.x; no network access needed.
 ---
 
 # CAWT Office automation (cawt-office)
