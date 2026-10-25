@@ -4,10 +4,11 @@
 # dates via Cawt IsoDateToOfficeDate + locale format codes, Formula vs
 # FormulaLocal, SetRowValues real numbers, CSV export encoding (cp1251 on ru)
 # and separators. Creates its own invisible instance; report in UTF-8.
-# Source is ASCII-only (Cyrillic via \uXXXX): tclsh reads sources as cp1251.
+# Source is ASCII-only (Cyrillic via \uXXXX): tclsh reads sources in the
+# system encoding (cp1251 on ru-RU Windows), not UTF-8.
 #
 # Usage:
-#   C:\ATcl\bin\tclsh.exe locale_test.tcl
+#   tclsh locale_test.tcl
 #   -> writes test-output/locale_report.txt next to this script
 
 set outDir     [file join [file dirname [info script]] "test-output"]

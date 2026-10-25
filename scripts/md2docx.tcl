@@ -2,7 +2,7 @@
 # in a VISIBLE Word instance left open for the user.
 #
 # Usage:
-#   C:\ATcl\bin\tclsh.exe md2docx.tcl <input.md> <output.docx>
+#   tclsh md2docx.tcl <input.md> <output.docx>
 #
 # Supported Markdown subset: #/##/### headings, fenced code blocks (```),
 # blockquotes (>), bullet/numbered lists with continuation lines, paragraphs
