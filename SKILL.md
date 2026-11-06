@@ -22,9 +22,23 @@ ru-RU.
 
 ## Quick start
 
-1. You need a Tcl interpreter (8.6+) with Twapi (>= 4.4; Tcl 9 needs >= 5)
-   and CAWT (>= 3.x). Verify a candidate interpreter with
-   `<tclsh> scripts/cawt_check.tcl` — it must print CAWT/Twapi versions.
+1. **Tcl interpreter detection (automated).** The skill auto-detects a
+   CAWT-compatible Tcl interpreter on first use. It scans PATH, Windows
+   registry, and known installation paths (ActiveTcl, BAWT, MagicSplat, MSYS2,
+   Cygwin, portable kits). Results are cached in the PowerShell session memory.
+
+   **Manual override:** Create `.cawt-office` in the skill root (one per system):
+   ```
+   # .cawt-office
+   tclsh_path=R:\tclwinkit-msvc.exe
+   verbose=true
+   ```
+
+   **Direct detection:** Run `powershell scripts/cawt-detect.ps1 [-Verbose] [-ForceRefresh]`
+   — returns the interpreter path or an error with download instructions.
+
+   **Legacy manual setup:** If you need to configure TCLLIBPATH manually, verify
+   with `<tclsh> scripts/cawt_check.tcl` — it must print CAWT/Twapi versions.
    Beware: on Windows several Tcl installs often coexist and the `tclsh` on
    PATH may be one WITHOUT CAWT (`where.exe tclsh` lists candidates; test each
    with cawt_check). If CAWT is installed but not found, add its directory via
@@ -58,6 +72,9 @@ other machines will differ.
 
 | Script | Args | Purpose | Wall |
 |---|---|---|---:|
+| `cawt-detect.ps1` | `[-Verbose] [-ForceRefresh]` | **PowerShell:** find CAWT-compatible Tcl interpreter, cache in session | <1 s |
+| `cawt-office.ps1` | — | **PowerShell module:** functions for Tcl detection (used by DSH skill) | — |
+| `cawt-check.tcl` | — | **Tcl:** quick CAWT availability check (called by cawt-detect.ps1) | <1 s |
 | `cawt_check.tcl` | — | environment health: tclsh, Twapi, CAWT, sub-package versions | <1 s |
 | `cawt_probe.tcl` | `[pattern]` e.g. `"Excel::Set*"` | exact command names of the installed CAWT version | <1 s |
 | `Excel-01_Create.tcl` | `<out.xlsx> [overwrite]` | hidden Excel: create+fill+save a sample table (real numbers), quit | ~2 s |
