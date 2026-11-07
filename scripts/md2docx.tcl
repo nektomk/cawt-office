@@ -6,10 +6,16 @@
 #   overwrite = 1/true/yes/force permits replacing an existing file;
 #   without it an existing <output.docx> is refused with exit code 2 (S10).
 #
-# Supported Markdown subset: #/##/### headings, fenced code blocks (```),
-# blockquotes (>), bullet/numbered lists with continuation lines, paragraphs
-# with inline **bold**, `code`, [links](url) and <raw urls>.
-# Source is ASCII-only; all Unicode comes from the input file (read as UTF-8).
+# Pipeline:  Markdown::convert (tcllib) -> XHTML fragment -> tdom DOM tree
+#            -> recursive render into Word via CAWT.
+#
+# Supported Markdown: headings (# .. ######), fenced code blocks (```),
+# blockquotes (>), bullet/numbered lists (incl. nested), tables (GFM:
+# |---|---|), paragraphs with inline **bold**, *italic*, `code` and
+# [links](url). Source is read as UTF-8 (may contain any Unicode).
+#
+# The Markdown::convert (tcllib, part of the Markdown 1.x package) and tdom
+# (XML/DOM parser) packages must be installed; both ship with BAWT/ActiveTcl.
 
 if { [llength $argv] < 2 } {
     puts "Usage: tclsh md2docx.tcl <input.md> <output.docx> [overwrite]"
@@ -30,139 +36,63 @@ if { ! $overwrite && [file exists $outPath] } {
     exit 2
 }
 
-# ---------------- Read markdown ----------------
+# ---------------- Read markdown + convert to XHTML ----------------
 set fh [open $mdPath r]
 fconfigure $fh -encoding utf-8
 set content [read $fh]
 close $fh
-set mdLines [split $content "\n"]
 
-# ---------------- Preprocess: join soft wraps into logical blocks ----------------
-set blocks {}
-set buf ""
-set bufTag ""
+package require Markdown
+package require tdom
 
-proc flushBuf {} {
-    global buf bufTag blocks
-    if { $bufTag ne "" && [string trim $buf] ne "" } {
-        lappend blocks [list $bufTag [string trim $buf]]
-    }
-    set buf ""
-    set bufTag ""
-}
+# Returns an XHTML fragment (multiple top-level elements).
+set frag [Markdown::convert $content]
+set doc [dom parse "<root>$frag</root>"]
+set root [$doc documentElement]
 
-set inCode false
-foreach raw $mdLines {
-    set line [string trimright $raw "\r"]
-
-    if { [string match "```*" $line] } {
-        flushBuf
-        set inCode [expr { ! $inCode }]
-        continue
-    }
-    if { $inCode } {
-        lappend blocks [list code $line]
-        continue
-    }
-    if { [string trim $line] eq "" } {
-        flushBuf
-        continue
-    }
-    if { [regexp {^(#{1,6})\s+(.*)$} $line -> hashes htxt] } {
-        flushBuf
-        set lvl [string length $hashes]
-        if { $lvl > 3 } { set lvl 3 }
-        lappend blocks [list h$lvl $htxt]
-        continue
-    }
-    if { [string match ">*" $line] } {
-        set qtxt [string trim [string range $line 1 end]]
-        if { $qtxt eq "" } {
-            flushBuf
-            lappend blocks {qempty {}}
-            continue
-        }
-        if { $bufTag eq "q" } {
-            append buf " " $qtxt
+# ---------------- Rendering helpers ----------------
+# Collect the plain text of a node (concatenated descendant text nodes).
+proc nodeText { node } {
+    set out ""
+    foreach child [$node childNodes] {
+        if { [$child nodeName] eq "#text" } {
+            append out [$child data]
         } else {
-            flushBuf
-            set bufTag "q"
-            set buf $qtxt
-        }
-        continue
-    }
-    if { [regexp {^-\s+(.*)$} $line -> itxt] } {
-        flushBuf
-        lappend blocks [list ul $itxt]
-        continue
-    }
-    if { [regexp {^\s*(\d+)\.\s+(.*)$} $line -> num itxt] } {
-        flushBuf
-        lappend blocks [list ol [list $num $itxt]]
-        continue
-    }
-
-    # Plain text: soft-wrap continuation merges into the current buffer,
-    # indented lines after a list item merge into that item.
-    set trimmed [string trim $line]
-    if { [regexp {^\s\s+} $line] && [llength $blocks] > 0 } {
-        set lastTag  [lindex [lindex $blocks end] 0]
-        set lastData [lindex [lindex $blocks end] 1]
-        if { $lastTag eq "ul" } {
-            lset blocks end 1 "$lastData $trimmed"
-            continue
-        }
-        if { $lastTag eq "ol" } {
-            lset blocks end 1 [list [lindex $lastData 0] "[lindex $lastData 1] $trimmed"]
-            continue
+            append out [nodeText $child]
         }
     }
-    if { $bufTag eq "p" } {
-        append buf " " $trimmed
-    } else {
-        flushBuf
-        set bufTag "p"
-        set buf $trimmed
-    }
+    return $out
 }
-flushBuf
 
-puts "Parsed [llength $mdLines] lines into [llength $blocks] blocks"
-
-# ---------------- Inline markdown parser ----------------
-# Returns a list of {text kind} segments; kind: n=normal, b=bold, c=code.
-proc parseInline { text } {
-    regsub -all {\[([^\]]+)\]\(([^)]+)\)} $text {\1 (\2)} text
-    regsub -all {<(https?://[^>]+)>} $text {\1} text
-
+# Collect inline segments {text kind} from a node's children.
+# kind: n=normal, b=bold, i=italic, c=code.
+proc collectInline { node } {
     set segs {}
-    set ci 0
-    foreach codePart [split $text `] {
-        incr ci
-        if { $ci % 2 == 0 } {
-            if { $codePart ne "" } { lappend segs [list $codePart c] }
-            continue
-        }
-        set mapped [string map [list "**" \u0001] $codePart]
-        set bi 0
-        foreach bPart [split $mapped \u0001] {
-            incr bi
-            if { $bPart eq "" } { continue }
-            if { $bi % 2 == 0 } {
-                lappend segs [list $bPart b]
-            } else {
-                lappend segs [list $bPart n]
+    foreach child [$node childNodes] {
+        set name [$child nodeName]
+        switch -- $name {
+            "#text"     { set t [$child data]; if { $t ne "" } { lappend segs [list $t n] } }
+            "strong" - "b" {
+                foreach s [collectInline $child] { lset s 1 b; lappend segs $s }
             }
+            "em" - "i"  {
+                foreach s [collectInline $child] { lset s 1 i; lappend segs $s }
+            }
+            "code"      { lappend segs [list [nodeText $child] c] }
+            # Links: rendered as plain text (no hyperlink creation here).
+            "a"         { foreach s [collectInline $child] { lappend segs $s } }
+            default     { foreach s [collectInline $child] { lappend segs $s } }
         }
     }
     if { [llength $segs] == 0 } { lappend segs [list "" n] }
     return $segs
 }
 
-# ---------------- Rendering helpers ----------------
 proc applyRunStyle { r kind } {
     switch -- $kind {
-        b { catch { $r -with { Font } Bold -1 } }
+        n { catch { $r -with { Font } Reset } }
+        b { catch { $r -with { Font } Reset }; catch { $r -with { Font } Bold -1 } }
+        i { catch { $r -with { Font } Reset }; catch { $r -with { Font } Italic -1 } }
         c {
             catch { $r -with { Font } Name "Consolas" }
             catch { $r -with { Font } Size 9.5 }
@@ -172,28 +102,30 @@ proc applyRunStyle { r kind } {
     }
 }
 
-# Append inline-parsed text as runs; paragraph break after the last run.
-# $decor (optional) is eval'd per run with $r and $kind in scope.
-proc appendSegs { docId text { decor "" } } {
-    set segs [parseInline $text]
-    set n [llength $segs]
-    set i 0
+# Append inline segments as runs in the current (last) paragraph.
+# Manual GetEndRange+InsertAfter instead of Word AppendText: AppendText applies
+# paragraph style wdStyleNormal via SetRangeStyle, which erases the direct
+# formatting (fonts) of *all* runs in that paragraph, so the first run's style
+# leaks to the end of the paragraph. InsertAfter only affects the new text.
+proc appendSegs { docId segs } {
     foreach seg $segs {
-        incr i
         lassign $seg txt kind
-        set r [Word AppendText $docId $txt [expr { $i == $n }]]
+        set r [Word GetEndRange $docId]
+        $r InsertAfter $txt
         applyRunStyle $r $kind
-        if { $decor ne "" } { eval $decor }
         Cawt Destroy $r
     }
+    # Terminate the paragraph after the last run.
+    set end [Word GetEndRange $docId]
+    $end InsertParagraphAfter
+    Cawt Destroy $end
 }
 
 proc lastParaRange { docId } {
     set paras [$docId Paragraphs]
     set cnt [$paras Count]
     # Word's Paragraphs collection includes the trailing empty paragraph after
-    # the final paragraph mark, so the paragraph just appended is Item Count-1
-    # (verified live with word_paras_probe.tcl).
+    # the final paragraph mark, so the paragraph just appended is Item Count-1.
     set idx [expr { $cnt > 1 ? $cnt - 1 : $cnt }]
     set p [$paras Item $idx]
     set r [$p Range]
@@ -202,84 +134,201 @@ proc lastParaRange { docId } {
     return $r
 }
 
-proc renderBlock { docId block } {
-    lassign $block tag data
-    switch -- $tag {
-        h1 - h2 - h3 {
-            set lvl   [string index $tag 1]
-            set style [lindex {wdStyleHeading1 wdStyleHeading2 wdStyleHeading3} [expr { $lvl - 1 }]]
-            set col   [lindex {#1F4E79 #2E74B5 #1F4E79} [expr { $lvl - 1 }]]
-            set r [Word AppendText $docId $data true $style]
-            catch { $r -with { Font } Color [Cawt GetColor $col] }
-            if { $lvl == 1 } {
-                catch { $r -with { Font } Size 20 }
-                catch { $r -with { ParagraphFormat } SpaceAfter 10 }
-            } elseif { $lvl == 2 } {
-                catch { $r -with { Font } Size 15 }
-                catch { $r -with { ParagraphFormat } SpaceBefore 14 SpaceAfter 5 }
-            } else {
-                catch { $r -with { Font } Size 12.5 }
-            }
-            Cawt Destroy $r
+# ---------------- Block renderers ----------------
+proc renderHeading { docId node } {
+    set lvl   [string index [$node nodeName] 1]
+    if { $lvl > 3 } { set lvl 3 }
+    set style [lindex {wdStyleHeading1 wdStyleHeading2 wdStyleHeading3} [expr { $lvl - 1 }]]
+    set col   [lindex {#1F4E79 #2E74B5 #1F4E79} [expr { $lvl - 1 }]]
+    set r [Word AppendText $docId [nodeText $node] true $style]
+    catch { $r -with { Font } Color [Cawt GetColor $col] }
+    if { $lvl == 1 } {
+        catch { $r -with { Font } Size 20 }
+        catch { $r -with { ParagraphFormat } SpaceAfter 10 }
+    } elseif { $lvl == 2 } {
+        catch { $r -with { Font } Size 15 }
+        catch { $r -with { ParagraphFormat } SpaceBefore 14 SpaceAfter 5 }
+    } else {
+        catch { $r -with { Font } Size 12.5 }
+    }
+    Cawt Destroy $r
+}
+
+proc renderParagraph { docId node } {
+    appendSegs $docId [collectInline $node]
+    set pr [lastParaRange $docId]
+    catch { $pr -with { ParagraphFormat } SpaceAfter 6 }
+    Cawt Destroy $pr
+}
+
+proc renderQuote { docId node } {
+    # A blockquote wraps its paragraphs in <p>; render the text inline with
+    # quote styling (italic, tinted background, indents).
+    appendSegs $docId [collectInline $node]
+    set pr [lastParaRange $docId]
+    catch { $pr -with { Font } Italic -1 }
+    catch { $pr -with { ParagraphFormat } LeftIndent 14 RightIndent 14 SpaceBefore 2 SpaceAfter 3 }
+    catch { $pr -with { Shading } BackgroundPatternColor [Cawt GetColor "#EEF3FA"] }
+    Cawt Destroy $pr
+}
+
+proc renderCodeBlock { docId node } {
+    # The pre/code text is multi-line: Word splits one AppendText call into
+    # several paragraphs. Style the returned range $r (covers ALL those lines)
+    # instead of lastParaRange (which would style only the trailing line).
+    set r [Word AppendText $docId [nodeText $node] true]
+    catch { $r -with { Font } Name "Consolas" }
+    catch { $r -with { Font } Size 9 }
+    catch { $r -with { Font } Color [Cawt GetColor "#1F1F1F"] }
+    catch { $r -with { ParagraphFormat } SpaceBefore 0 SpaceAfter 0 LeftIndent 10 }
+    catch { $r -with { Shading } BackgroundPatternColor [Cawt GetColor "#F5F5F5"] }
+    Cawt Destroy $r
+}
+
+proc renderList { docId node } {
+    set ordered [expr { [$node nodeName] eq "ol" }]
+    set counter 0
+    foreach li [$node childNodes] {
+        if { [$li nodeName] ne "li" } { continue }
+        incr counter
+        # Marker: bullet or number. Nested lists inside <li> are rendered
+        # inline (the Markdown package flattens them into the same <li>).
+        if { $ordered } {
+            set marker "$counter.  "
+        } else {
+            set marker "\u2022  "
         }
-        p {
-            appendSegs $docId $data
-            set pr [lastParaRange $docId]
-            catch { $pr -with { ParagraphFormat } SpaceAfter 6 }
-            Cawt Destroy $pr
-        }
-        q {
-            appendSegs $docId $data {
-                $r -with { Font } Italic -1
-                if { $kind ne "c" } {
-                    $r -with { Font } Color [Cawt GetColor "#33587A"]
+        set r [Word AppendText $docId $marker false]
+        catch { $r -with { Font } Bold -1 }
+        catch { $r -with { Font } Color [Cawt GetColor "#1F4E79"] }
+        Cawt Destroy $r
+        appendSegs $docId [collectInline $li]
+        set pr [lastParaRange $docId]
+        catch { $pr -with { ParagraphFormat } LeftIndent 24 FirstLineIndent -13 SpaceAfter 3 }
+        Cawt Destroy $pr
+    }
+}
+
+proc renderTable { docId node } {
+    # Collect rows: list of {header|body rowCells}. The Markdown package emits
+    # <table><thead><tr><th>..</th></tr></thead><tbody><tr><td>..</td></tr></tbody></table>.
+    set rows {}       ;# each: list of cell texts
+    set headerRow {}  ;# first row (thead) or first body row if no thead
+    set hasHeader false
+
+    foreach child [$node childNodes] {
+        set name [$child nodeName]
+        if { $name eq "thead" } {
+            set hasHeader true
+            # thead's direct children are <tr> rows; take the first one as header.
+            foreach tr [$child childNodes] {
+                if { [$tr nodeName] eq "tr" } {
+                    set headerRow [renderTrCells $tr]
+                    break
                 }
             }
-            set pr [lastParaRange $docId]
-            catch { $pr -with { ParagraphFormat } LeftIndent 14 RightIndent 14 SpaceBefore 2 SpaceAfter 3 }
-            catch { $pr -with { Shading } BackgroundPatternColor [Cawt GetColor "#EEF3FA"] }
-            Cawt Destroy $pr
-        }
-        qempty {
-            set r [Word AppendText $docId "" true]
-            Cawt Destroy $r
-            set pr [lastParaRange $docId]
-            catch { $pr -with { Font } Size 4 }
-            catch { $pr -with { ParagraphFormat } LeftIndent 14 RightIndent 14 SpaceBefore 0 SpaceAfter 0 }
-            catch { $pr -with { Shading } BackgroundPatternColor [Cawt GetColor "#EEF3FA"] }
-            Cawt Destroy $pr
-        }
-        ul - ol {
-            if { $tag eq "ul" } {
-                set prefix "\u2022  "
-                set body   $data
-            } else {
-                set prefix "[lindex $data 0].  "
-                set body   [lindex $data 1]
+        } elseif { $name eq "tbody" } {
+            foreach tr [$child childNodes] {
+                if { [$tr nodeName] eq "tr" } {
+                    lappend rows [renderTrCells $tr]
+                }
             }
-            set r [Word AppendText $docId $prefix false]
-            catch { $r -with { Font } Bold -1 }
-            catch { $r -with { Font } Color [Cawt GetColor "#1F4E79"] }
-            Cawt Destroy $r
-            appendSegs $docId $body
-            set pr [lastParaRange $docId]
-            catch { $pr -with { ParagraphFormat } LeftIndent 24 FirstLineIndent -13 SpaceAfter 3 }
-            Cawt Destroy $pr
+        } elseif { $name eq "tr" } {
+            lappend rows [renderTrCells $child]
         }
-        code {
-            set r [Word AppendText $docId $data true]
-            catch { $r -with { Font } Name "Consolas" }
-            catch { $r -with { Font } Size 9 }
-            catch { $r -with { Font } Color [Cawt GetColor "#1F1F1F"] }
-            Cawt Destroy $r
-            set pr [lastParaRange $docId]
-            catch { $pr -with { ParagraphFormat } SpaceBefore 0 SpaceAfter 0 LeftIndent 10 }
-            catch { $pr -with { Shading } BackgroundPatternColor [Cawt GetColor "#F5F5F5"] }
-            Cawt Destroy $pr
+    }
+
+    if { $hasHeader } {
+        # Prepend the header row as the first table row.
+        set allRows [concat [list $headerRow] $rows]
+        set headerIndex 0
+    } else {
+        set allRows $rows
+        set headerIndex -1
+    }
+
+    if { [llength $allRows] == 0 } { return }
+
+    # Determine column count (max across rows).
+    set nCols 0
+    foreach r $allRows {
+        set c [llength $r]
+        if { $c > $nCols } { set nCols $c }
+    }
+    if { $nCols == 0 } { return }
+
+    set nRows [llength $allRows]
+    set tableRange [Word GetEndRange $docId]
+    set tableId [Word AddTable $tableRange $nRows $nCols]
+    Cawt Destroy $tableRange
+
+    set r 0
+    foreach row $allRows {
+        incr r
+        set c 0
+        foreach cell $row {
+            incr c
+            if { $c <= $nCols } {
+                Word SetCellValue $tableId $r $c $cell
+            }
         }
-        default {
-            puts "  (skip unknown block tag: $tag)"
+    }
+
+    # Style the header row (or first row if no header): bold + background.
+    if { $nRows > 0 } {
+        set styleRow 1
+        for { set c 1 } { $c <= $nCols } { incr c } {
+            set cr [Word GetCellRange $tableId $styleRow $c]
+            catch { $cr -with { Font } Bold -1 }
+            catch { $cr -with { Font } Color [Cawt GetColor "#FFFFFF"] }
+            catch { $cr -with { Shading } BackgroundPatternColor [Cawt GetColor "#1F4E79"] }
+            Cawt Destroy $cr
         }
+    }
+
+    # Keep column widths reasonable: autofit content.
+    catch { $tableId -with { Columns } Autofit 1 }
+    Cawt Destroy $tableId
+
+    # Word inserts a paragraph after a table; ensure the following content
+    # starts on a new paragraph.
+    set blank [Word AppendText $docId "" true]
+    Cawt Destroy $blank
+}
+
+proc renderTrCells { trNode } {
+    set cells {}
+    foreach cell [$trNode childNodes] {
+        if { [$cell nodeName] eq "th" || [$cell nodeName] eq "td" } {
+            lappend cells [nodeText $cell]
+        }
+    }
+    return $cells
+}
+
+proc renderNode { docId node } {
+    set name [$node nodeName]
+    # Skip whitespace-only text nodes at block level.
+    if { $name eq "#text" } {
+        if { [string trim [$node data]] eq "" } { return }
+        # Stray text outside a paragraph: render as paragraph.
+        appendSegs $docId [collectInline $node]
+        set pr [lastParaRange $docId]
+        catch { $pr -with { ParagraphFormat } SpaceAfter 6 }
+        Cawt Destroy $pr
+        return
+    }
+    switch -- $name {
+        h1 - h2 - h3 - h4 - h5 - h6 { renderHeading $docId $node }
+        p                           { renderParagraph $docId $node }
+        blockquote                  { renderQuote $docId $node }
+        pre                         { renderCodeBlock $docId $node }
+        ul - ol                     { renderList $docId $node }
+        table                       { renderTable $docId $node }
+        # Skip other structural wrappers; render their children.
+        div - span { foreach child [$node childNodes] { renderNode $docId $child } }
+        hr        { set r [Word AppendText $docId "" true]; Cawt Destroy $r }
+        default   { foreach child [$node childNodes] { renderNode $docId $child } }
     }
 }
 
@@ -296,14 +345,16 @@ if { [catch {
     set docId [Word AddDocument $appId]
 
     set cnt 0
-    foreach block $blocks {
-        renderBlock $docId $block
+    set total [llength [$root childNodes]]
+    foreach child [$root childNodes] {
+        renderNode $docId $child
         incr cnt
-        if { $cnt % 20 == 0 } { puts "  rendered $cnt/[llength $blocks] blocks..." }
+        if { $cnt % 20 == 0 } { puts "  rendered $cnt/$total nodes..." }
     }
 
     set nChars [Word GetNumCharacters $docId]
-    puts "Rendered $cnt blocks, $nChars characters"
+    set nTables [Word GetNumTables $docId]
+    puts "Rendered $cnt nodes, $nChars characters, $nTables tables"
 
     Word SaveAs $docId $outPath
     puts "Saved: $outPath"
@@ -311,14 +362,11 @@ if { [catch {
 } err] } {
     puts "FATAL: $err"
     # Locked-target hint; the COM message is locale-dependent, so match the
-    # English and the Russian wording ("...another process" / "...\u0434\u0440\u0443\u0433\u0438\u043c \u043f\u0440\u043e\u0446\u0435\u0441\u0441\u043e\u043c").
+    # English and the Russian wording ("...another process" / "...другим процессом").
     if { [string match -nocase "*another process*" $err] || [string match -nocase "*\u0434\u0440\u0443\u0433\u0438\u043c \u043f\u0440\u043e\u0446\u0435\u0441\u0441\u043e\u043c*" $err] } {
         puts "HINT: target file is locked (probably open in Word) - close it and retry"
     }
-    # Close only OUR document (no prompts), then quit OUR instance: Word
-    # OpenNew uses GetOrCreateApp ... false (wordBasic.tcl:1522), so the
-    # instance is always one this script created - never the user's Word.
-    # Without this an empty visible window would survive the failure.
+    # Close only OUR document (no prompts), then quit OUR instance.
     if { $docId ne "" } { catch { $docId Close 0 } }
     if { $appId ne "" } { catch { Word Quit $appId } }
     catch { Cawt Destroy }
