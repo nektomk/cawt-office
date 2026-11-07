@@ -51,6 +51,20 @@ set doc [dom parse "<root>$frag</root>"]
 set root [$doc documentElement]
 
 # ---------------- Rendering helpers ----------------
+# Double-decode HTML entities: Markdown::convert escapes special chars in
+# fenced code twice (& -> &amp; -> &amp;amp;  , " -> &quot; -> &amp;quot;).
+# tdom undoes one level (so text holds &amp;quot;); undo the second here.
+proc decodeEntities { s } {
+    return [string map {
+        "&amp;" "&"
+        "&lt;"  "<"
+        "&gt;"  ">"
+        "&quot;" "\""
+        "&#39;" "'"
+        "&apos;" "'"
+    } $s]
+}
+
 # Collect the plain text of a node (concatenated descendant text nodes).
 proc nodeText { node } {
     set out ""
@@ -61,7 +75,7 @@ proc nodeText { node } {
             append out [nodeText $child]
         }
     }
-    return $out
+    return [decodeEntities $out]
 }
 
 # Collect inline segments {text kind} from a node's children.
